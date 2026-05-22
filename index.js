@@ -83,7 +83,7 @@ async function run() {
     // ===== MEALS =====
     // সব meals পাওয়া
     app.get('/daily-meals', async (req, res) => {
-            const cursor = mealsCollection.find().sort({ createdAt: -1 }).limit(6);
+            const cursor = mealsCollection.find().sort({ createdAt: 1 }).limit(6);
             const result = await cursor.toArray();
             res.send(result);
     })
@@ -121,7 +121,7 @@ async function run() {
     // ===== REVIEWS =====
     // সব reviews পাওয়া (home page এ দেখাবে)
     app.get("/reviews", async (req, res) => {
-        const cursor = reviewsCollection.find().sort({ createdAt: -1 }).limit(3)
+        const cursor = reviewsCollection.find().sort({ date: 1 }).limit(3)
         const result = await cursor.toArray();
         res.send(result);
     });
