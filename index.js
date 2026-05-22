@@ -121,7 +121,7 @@ async function run() {
     // ===== REVIEWS =====
     // সব reviews পাওয়া (home page এ দেখাবে)
     app.get("/reviews", async (req, res) => {
-        const cursor = reviewsCollection.find().sort({ date: 1 }).limit(3)
+        const cursor = reviewsCollection.find().sort({ date: 1 }).limit(6)
         const result = await cursor.toArray();
         res.send(result);
     });
@@ -132,6 +132,34 @@ async function run() {
       const result = await reviewsCollection.find({ foodId }).toArray();
       res.send(result);
     });
+
+    app.get("/my-reviews/:email", async (req, res) => {
+  const email = req.params.email;
+  const result = await reviewsCollection
+    .find({ reviewerEmail: email })
+    .toArray();
+  res.send(result);
+});
+
+    // Review delete
+    app.delete("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await reviewsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // Review update
+    app.patch("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+      const { rating, comment } = req.body;
+      const result = await reviewsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { rating, comment } }
+      );
+      res.send(result);
+    })
 
     // Review submit করা
     app.post("/reviews", async (req, res) => {
