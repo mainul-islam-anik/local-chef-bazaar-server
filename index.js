@@ -88,10 +88,20 @@ async function run() {
             res.send(result);
     })
 
+
     app.get("/meals", async (req, res) => {
-      const limit = parseInt(req.query.limit) || 0;
-      const result = await mealsCollection.find().limit(limit).toArray();
-      res.send(result);
+            const limit = parseInt(req.query.limit) || 10;
+            const skip = parseInt(req.query.skip) || 0;
+            const sort = req.query.sort;
+
+            let sortOption = {};
+            if (sort === "asc") sortOption = { price: 1 };
+            if (sort === "desc") sortOption = { price: -1 };
+
+            const total = await mealsCollection.countDocuments();
+            const meals = await mealsCollection.find().sort(sortOption).skip(skip).limit(limit).toArray();
+
+            res.send({ meals, total });
     });
 
     // একটি meal এর details
