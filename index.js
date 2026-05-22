@@ -118,6 +118,35 @@ async function run() {
       res.send(result);
     });
 
+    // Chef এর meals পাওয়া
+    app.get("/my-meals/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await mealsCollection
+        .find({ userEmail: email })
+        .toArray();
+      res.send(result);
+    });
+
+    // Meal delete
+    app.delete("/meals/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await mealsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // Meal update
+    app.patch("/meals/:id", async (req, res) => {
+      const id = req.params.id;
+      const updatedData = req.body;
+      const result = await mealsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updatedData }
+      );
+      res.send(result);
+    });
+
     // ===== REVIEWS =====
     // সব reviews পাওয়া (home page এ দেখাবে)
     app.get("/reviews", async (req, res) => {
