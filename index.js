@@ -113,7 +113,7 @@ async function run() {
     });
 
     // সব users পাওয়া (admin only)
-    app.get("/users", async (req, res) => {
+    app.get("/users",verifyToken, verifyAdmin, async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
@@ -173,7 +173,7 @@ app.post("/jwt", async (req, res) => {
     });
 
     // Meal তৈরি করা (chef)
-    app.post("/meals", async (req, res) => {
+    app.post("/meals",verifyToken, verifyChef, async (req, res) => {
       const meal = req.body;
       const result = await mealsCollection.insertOne(meal);
       res.send(result);
@@ -252,7 +252,7 @@ app.post("/jwt", async (req, res) => {
     })
 
     // Review submit করা
-    app.post("/reviews", async (req, res) => {
+    app.post("/reviews",verifyToken, async (req, res) => {
       const review = req.body;
       const result = await reviewsCollection.insertOne(review);
       res.send(result);
@@ -260,15 +260,21 @@ app.post("/jwt", async (req, res) => {
 
     // ===== ORDERS =====
     // Order place করা
-    app.post("/orders", async (req, res) => {
+    app.post("/orders",verifyToken, async (req, res) => {
       const order = req.body;
       const result = await ordersCollection.insertOne(order);
       res.send(result);
     });
 
     // User এর orders পাওয়া
-    app.get("/orders/:email", async (req, res) => {
+    app.get("/orders/:email",verifyToken, async (req, res) => {
       const email = req.params.email;
+
+      // নিজের orders ছাড়া অন্যেরটা দেখতে পারবে না
+      if (req.decoded.email !== email) {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+
       const result = await ordersCollection.find({ userEmail: email }).toArray();
       res.send(result);
     });
@@ -305,7 +311,7 @@ app.post("/jwt", async (req, res) => {
  
 
     // ===== FAVORITES =====
-    app.post("/favorites", async (req, res) => {
+    app.post("/favorites",verifyToken, async (req, res) => {
       const fav = req.body;
       const exists = await favoritesCollection.findOne({
         userEmail: fav.userEmail,
@@ -332,7 +338,7 @@ app.post("/jwt", async (req, res) => {
     // ===== ADMIN ROUTES =====
 
     // Make Fraud
-    app.patch("/users/fraud/:id", async (req, res) => {
+    app.patch("/users/fraud/:id",verifyToken, verifyAdmin,  async (req, res) => {
       const id = req.params.id;
       const result = await usersCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -342,13 +348,13 @@ app.post("/jwt", async (req, res) => {
     });
 
     // সব Requests পাওয়া
-    app.get("/requests", async (req, res) => {
+    app.get("/requests",verifyToken, verifyAdmin, async (req, res) => {
       const result = await requestsCollection.find().toArray();
       res.send(result);
     });
 
     // Request Accept
-    app.patch("/requests/accept/:id", async (req, res) => {
+    app.patch("/requests/accept/:id",verifyToken, verifyAdmin,  async (req, res) => {
       const id = req.params.id;
       const { userEmail, requestType } = req.body;
     
@@ -378,7 +384,7 @@ app.post("/jwt", async (req, res) => {
     });
 
     // Request Reject
-    app.patch("/requests/reject/:id", async (req, res) => {
+    app.patch("/requests/reject/:id",verifyToken, verifyAdmin,  async (req, res) => {
       const id = req.params.id;
       const result = await requestsCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -388,7 +394,7 @@ app.post("/jwt", async (req, res) => {
     });
 
     // Platform Statistics
-    app.get("/admin/statistics", async (req, res) => {
+    app.get("/admin/statistics",verifyToken, verifyAdmin, async (req, res) => {
       const totalUsers = await usersCollection.countDocuments();
       const totalOrders = await ordersCollection.countDocuments();
     
