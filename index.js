@@ -212,6 +212,37 @@ async function run() {
       res.send(result);
     });
 
+
+
+    // app.get("/orders", async (req,res)=>{
+    //   const cursor = ordersCollection.find()
+    //   const result = await cursor.toArray()
+    //   res.send(result)
+    // })
+    // ===CHEF-ORDER===
+
+    // Chef এর orders পাওয়া (chefId দিয়ে)
+    app.get("/chef-orders/:chefId", async (req, res) => {
+      const chefId = req.params.chefId;
+      const result = await ordersCollection
+        .find({ chefId: chefId })
+        .toArray();
+      res.send(result);
+    });
+    
+    // Order status update
+    app.patch("/orders/update-status/:id", async (req, res) => {
+      const id = req.params.id;
+      const { orderStatus } = req.body;
+      const result = await ordersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { orderStatus } }
+      );
+      res.send(result);
+    });
+
+ 
+
     // ===== FAVORITES =====
     app.post("/favorites", async (req, res) => {
       const fav = req.body;
@@ -236,7 +267,102 @@ async function run() {
       res.send(result);
     });
 
- 
+
+    // ===== ADMIN ROUTES =====
+
+    // Make Fraud
+    app.patch("/users/fraud/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "fraud" } }
+      );
+      res.send(result);
+    });
+
+    // সব Requests পাওয়া
+    app.get("/requests", async (req, res) => {
+      const result = await requestsCollection.find().toArray();
+      res.send(result);
+    });
+
+    // Request Accept
+    app.patch("/requests/accept/:id", async (req, res) => {
+      const id = req.params.id;
+      const { userEmail, requestType } = req.body;
+    
+      // Request status update করো
+      await requestsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { requestStatus: "approved" } }
+      );
+    
+      // User role update করো
+      if (requestType === "chef") {
+        // Chef ID generate করো
+        const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
+      
+        await usersCollection.updateOne(
+          { email: userEmail },
+          { $set: { role: "chef", chefId: chefId } }
+        );
+      } else if (requestType === "admin") {
+        await usersCollection.updateOne(
+          { email: userEmail },
+          { $set: { role: "admin" } }
+        );
+      }
+    
+      res.send({ success: true });
+    });
+
+    // Request Reject
+    app.patch("/requests/reject/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await requestsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { requestStatus: "rejected" } }
+      );
+      res.send(result);
+    });
+
+    // Platform Statistics
+    app.get("/admin/statistics", async (req, res) => {
+      const totalUsers = await usersCollection.countDocuments();
+      const totalOrders = await ordersCollection.countDocuments();
+    
+      const pendingOrders = await ordersCollection.countDocuments({
+        orderStatus: "pending",
+      });
+      const deliveredOrders = await ordersCollection.countDocuments({
+        orderStatus: "delivered",
+      });
+      const cancelledOrders = await ordersCollection.countDocuments({
+        orderStatus: "cancelled",
+      });
+      const acceptedOrders = await ordersCollection.countDocuments({
+        orderStatus: "accepted",
+      });
+    
+      // Total payment হিসাব
+      const payments = await ordersCollection
+        .find({ paymentStatus: "paid" })
+        .toArray();
+    
+      const totalPayment = payments.reduce((sum, order) => {
+        return sum + order.price * order.quantity;
+      }, 0);
+    
+      res.send({
+        totalUsers,
+        totalOrders,
+        pendingOrders,
+        deliveredOrders,
+        cancelledOrders,
+        acceptedOrders,
+        totalPayment,
+      });
+    });
 
     
 
