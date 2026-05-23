@@ -3,6 +3,7 @@ const cors = require('cors')
 require('dotenv').config()
 const { ObjectId } = require('mongodb');
 const { MongoClient, ServerApiVersion } = require('mongodb');
+const jwt = require("jsonwebtoken");
 const app = express()
 const port = process.env.PORT || 5000;
 
@@ -13,6 +14,50 @@ const port = process.env.PORT || 5000;
 app.use(cors())
 app.use(express.json())
 
+
+
+// ===== JWT =====
+
+
+
+// ===== JWT Middleware =====
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: "Unauthorized access" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};
+
+// Admin verify middleware
+const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded.email;
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden access" });
+  }
+  next();
+};
+
+// Chef verify middleware
+const verifyChef = async (req, res, next) => {
+  const email = req.decoded.email;
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "chef") {
+    return res.status(403).send({ message: "Forbidden access" });
+  }
+  next();
+};
 
 
 
@@ -79,6 +124,22 @@ async function run() {
       const result = await usersCollection.findOne({ email });
       res.send(result);
     });
+
+    // ====jwt====
+
+    // Token generate করা
+app.post("/jwt", async (req, res) => {
+  const { email } = req.body;
+
+  const token = jwt.sign(
+    { email },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  res.send({ token });
+});
+
 
     // ===== MEALS =====
     // সব meals পাওয়া
