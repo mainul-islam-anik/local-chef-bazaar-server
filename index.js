@@ -7,59 +7,12 @@ const jwt = require("jsonwebtoken");
 const app = express()
 const port = process.env.PORT || 5000;
 
-
-
-
-// middlewere
-app.use(cors())
+// Middleware
+app.use(cors({
+  origin: ["http://localhost:5173"],
+  credentials: true,
+}));
 app.use(express.json())
-
-
-
-// ===== JWT =====
-
-
-
-// ===== JWT Middleware =====
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).send({ message: "Unauthorized access" });
-  }
-
-  const token = authHeader.split(" ")[1];
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).send({ message: "Unauthorized access" });
-    }
-    req.decoded = decoded;
-    next();
-  });
-};
-
-// Admin verify middleware
-const verifyAdmin = async (req, res, next) => {
-  const email = req.decoded.email;
-  const user = await usersCollection.findOne({ email });
-  if (user?.role !== "admin") {
-    return res.status(403).send({ message: "Forbidden access" });
-  }
-  next();
-};
-
-// Chef verify middleware
-const verifyChef = async (req, res, next) => {
-  const email = req.decoded.email;
-  const user = await usersCollection.findOne({ email });
-  if (user?.role !== "chef") {
-    return res.status(403).send({ message: "Forbidden access" });
-  }
-  next();
-};
-
-
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.4di52mx.mongodb.net/?appName=Cluster0`;
 
@@ -71,39 +24,75 @@ const client = new MongoClient(uri, {
   }
 });
 
+// ✅ Collections গুলো run() এর বাইরে declare করো
+// তাহলে middleware গুলো access করতে পারবে
+const db = client.db('localChef_db');
+const usersCollection = db.collection('users')
+const mealsCollection = db.collection('meals')
+const reviewsCollection = db.collection('reviews')
+const ordersCollection = db.collection("orders");
+const favoritesCollection = db.collection("favorites");
+const requestsCollection = db.collection("requests");
+const paymentsCollection = db.collection("payments");
 
-app.get('/', (req, res) =>{
-    res.send('local chef bazaar server is running')
-})
+// ===== JWT Middleware =====
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: "Unauthorized access" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};
 
+// ✅ Admin verify — এখন usersCollection access করতে পারবে
+const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded.email;
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden access" });
+  }
+  next();
+};
+
+// ✅ Chef verify — এখন usersCollection access করতে পারবে
+const verifyChef = async (req, res, next) => {
+  const email = req.decoded.email;
+  const user = await usersCollection.findOne({ email });
+  if (user?.role !== "chef") {
+    return res.status(403).send({ message: "Forbidden access" });
+  }
+  next();
+};
+
+app.get('/', (req, res) => {
+  res.send('local chef bazaar server is running')
+});
+
+// ✅ JWT route — run() এর বাইরে
+app.post("/jwt", (req, res) => {
+  const { email } = req.body;
+  const token = jwt.sign(
+    { email },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+  res.send({ token });
+});
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    console.log('database Connected')
-    // Send a ping to confirm a successful connection
-
-    const db = client.db('localChef_db');
-    const usersCollection = db.collection('users')
-    const mealsCollection = db.collection('meals')
-    const reviewsCollection = db.collection('reviews')
-    const ordersCollection = db.collection("orders");
-    const favoritesCollection = db.collection("favorites");
-    const requestsCollection = db.collection("requests");
-
-   
-
-
-
-
-    // reviews api
-
+    console.log('Database Connected ✅')
 
     // =====USER API========
-
-      // user post api
-      app.post("/users", async (req, res) => {
+    app.post("/users", async (req, res) => {
       const user = req.body;
       user.createdAt = new Date();
       const exists = await usersCollection.findOne({ email: user.email });
@@ -112,74 +101,56 @@ async function run() {
       res.send(result);
     });
 
-    // সব users পাওয়া (admin only)
-    app.get("/users",verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
 
-    // একজন user এর info পাওয়া (email দিয়ে)
     app.get("/users/:email", async (req, res) => {
       const email = req.params.email;
       const result = await usersCollection.findOne({ email });
       res.send(result);
     });
 
-    // ====jwt====
-
-    // Token generate করা
-app.post("/jwt", async (req, res) => {
-  const { email } = req.body;
-
-  const token = jwt.sign(
-    { email },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  res.send({ token });
-});
-
-
     // ===== MEALS =====
-    // সব meals পাওয়া
     app.get('/daily-meals', async (req, res) => {
-            const cursor = mealsCollection.find().sort({ createdAt: 1 }).limit(6);
-            const result = await cursor.toArray();
-            res.send(result);
-    })
-
-
-    app.get("/meals", async (req, res) => {
-            const limit = parseInt(req.query.limit) || 10;
-            const skip = parseInt(req.query.skip) || 0;
-            const sort = req.query.sort;
-
-            let sortOption = {};
-            if (sort === "asc") sortOption = { price: 1 };
-            if (sort === "desc") sortOption = { price: -1 };
-
-            const total = await mealsCollection.countDocuments();
-            const meals = await mealsCollection.find().sort(sortOption).skip(skip).limit(limit).toArray();
-
-            res.send({ meals, total });
-    });
-
-    // একটি meal এর details
-    app.get("/meals/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await mealsCollection.findOne({ _id: new ObjectId(id) });
+      const cursor = mealsCollection.find().sort({ createdAt: 1 }).limit(6);
+      const result = await cursor.toArray();
       res.send(result);
     });
 
-    // Meal তৈরি করা (chef)
-    app.post("/meals",verifyToken, verifyChef, async (req, res) => {
+    app.get("/meals", async (req, res) => {
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = parseInt(req.query.skip) || 0;
+      const sort = req.query.sort;
+      let sortOption = {};
+      if (sort === "asc") sortOption = { price: 1 };
+      if (sort === "desc") sortOption = { price: -1 };
+      const total = await mealsCollection.countDocuments();
+      const meals = await mealsCollection
+        .find()
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+      res.send({ meals, total });
+    });
+
+    app.get("/meals/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await mealsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // ✅ verifyChef এখন কাজ করবে
+    app.post("/meals", verifyToken, verifyChef, async (req, res) => {
       const meal = req.body;
       const result = await mealsCollection.insertOne(meal);
       res.send(result);
     });
 
-    // Chef এর meals পাওয়া
     app.get("/my-meals/:email", async (req, res) => {
       const email = req.params.email;
       const result = await mealsCollection
@@ -188,7 +159,6 @@ app.post("/jwt", async (req, res) => {
       res.send(result);
     });
 
-    // Meal delete
     app.delete("/meals/:id", async (req, res) => {
       const id = req.params.id;
       const result = await mealsCollection.deleteOne({
@@ -197,7 +167,6 @@ app.post("/jwt", async (req, res) => {
       res.send(result);
     });
 
-    // Meal update
     app.patch("/meals/:id", async (req, res) => {
       const id = req.params.id;
       const updatedData = req.body;
@@ -209,14 +178,12 @@ app.post("/jwt", async (req, res) => {
     });
 
     // ===== REVIEWS =====
-    // সব reviews পাওয়া (home page এ দেখাবে)
     app.get("/reviews", async (req, res) => {
-        const cursor = reviewsCollection.find().sort({ date: 1 }).limit(6)
-        const result = await cursor.toArray();
-        res.send(result);
+      const cursor = reviewsCollection.find().sort({ date: 1 }).limit(6);
+      const result = await cursor.toArray();
+      res.send(result);
     });
 
-    // একটি meal এর reviews
     app.get("/reviews/:foodId", async (req, res) => {
       const foodId = req.params.foodId;
       const result = await reviewsCollection.find({ foodId }).toArray();
@@ -224,14 +191,13 @@ app.post("/jwt", async (req, res) => {
     });
 
     app.get("/my-reviews/:email", async (req, res) => {
-  const email = req.params.email;
-  const result = await reviewsCollection
-    .find({ reviewerEmail: email })
-    .toArray();
-  res.send(result);
-});
+      const email = req.params.email;
+      const result = await reviewsCollection
+        .find({ reviewerEmail: email })
+        .toArray();
+      res.send(result);
+    });
 
-    // Review delete
     app.delete("/reviews/:id", async (req, res) => {
       const id = req.params.id;
       const result = await reviewsCollection.deleteOne({
@@ -240,7 +206,6 @@ app.post("/jwt", async (req, res) => {
       res.send(result);
     });
 
-    // Review update
     app.patch("/reviews/:id", async (req, res) => {
       const id = req.params.id;
       const { rating, comment } = req.body;
@@ -249,46 +214,32 @@ app.post("/jwt", async (req, res) => {
         { $set: { rating, comment } }
       );
       res.send(result);
-    })
+    });
 
-    // Review submit করা
-    app.post("/reviews",verifyToken, async (req, res) => {
+    app.post("/reviews", verifyToken, async (req, res) => {
       const review = req.body;
       const result = await reviewsCollection.insertOne(review);
       res.send(result);
     });
 
     // ===== ORDERS =====
-    // Order place করা
-    app.post("/orders",verifyToken, async (req, res) => {
+    app.post("/orders", verifyToken, async (req, res) => {
       const order = req.body;
       const result = await ordersCollection.insertOne(order);
       res.send(result);
     });
 
-    // User এর orders পাওয়া
-    app.get("/orders/:email",verifyToken, async (req, res) => {
+    app.get("/orders/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
-
-      // নিজের orders ছাড়া অন্যেরটা দেখতে পারবে না
       if (req.decoded.email !== email) {
         return res.status(403).send({ message: "Forbidden access" });
       }
-
-      const result = await ordersCollection.find({ userEmail: email }).toArray();
+      const result = await ordersCollection
+        .find({ userEmail: email })
+        .toArray();
       res.send(result);
     });
 
-
-
-    // app.get("/orders", async (req,res)=>{
-    //   const cursor = ordersCollection.find()
-    //   const result = await cursor.toArray()
-    //   res.send(result)
-    // })
-    // ===CHEF-ORDER===
-
-    // Chef এর orders পাওয়া (chefId দিয়ে)
     app.get("/chef-orders/:chefId", async (req, res) => {
       const chefId = req.params.chefId;
       const result = await ordersCollection
@@ -296,8 +247,7 @@ app.post("/jwt", async (req, res) => {
         .toArray();
       res.send(result);
     });
-    
-    // Order status update
+
     app.patch("/orders/update-status/:id", async (req, res) => {
       const id = req.params.id;
       const { orderStatus } = req.body;
@@ -308,10 +258,8 @@ app.post("/jwt", async (req, res) => {
       res.send(result);
     });
 
- 
-
     // ===== FAVORITES =====
-    app.post("/favorites",verifyToken, async (req, res) => {
+    app.post("/favorites", verifyToken, async (req, res) => {
       const fav = req.body;
       const exists = await favoritesCollection.findOne({
         userEmail: fav.userEmail,
@@ -324,51 +272,46 @@ app.post("/jwt", async (req, res) => {
 
     app.get("/favorites/:email", async (req, res) => {
       const email = req.params.email;
-      const result = await favoritesCollection.find({ userEmail: email }).toArray();
+      const result = await favoritesCollection
+        .find({ userEmail: email })
+        .toArray();
       res.send(result);
     });
 
     app.delete("/favorites/:id", async (req, res) => {
       const id = req.params.id;
-      const result = await favoritesCollection.deleteOne({ _id: new ObjectId(id) });
+      const result = await favoritesCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
       res.send(result);
     });
 
-
-    // ===== ADMIN ROUTES =====
-
-    // Make Fraud
-    app.patch("/users/fraud/:id",verifyToken, verifyAdmin,  async (req, res) => {
-      const id = req.params.id;
-      const result = await usersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: "fraud" } }
-      );
+    // ===== REQUESTS =====
+    app.post("/requests", async (req, res) => {
+      const request = req.body;
+      const exists = await requestsCollection.findOne({
+        userEmail: request.userEmail,
+        requestStatus: "pending",
+      });
+      if (exists) return res.send({ message: "Already has pending request" });
+      const result = await requestsCollection.insertOne(request);
       res.send(result);
     });
 
-    // সব Requests পাওয়া
-    app.get("/requests",verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/requests", verifyToken, verifyAdmin, async (req, res) => {
       const result = await requestsCollection.find().toArray();
       res.send(result);
     });
 
-    // Request Accept
-    app.patch("/requests/accept/:id",verifyToken, verifyAdmin,  async (req, res) => {
+    app.patch("/requests/accept/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const { userEmail, requestType } = req.body;
-    
-      // Request status update করো
       await requestsCollection.updateOne(
         { _id: new ObjectId(id) },
         { $set: { requestStatus: "approved" } }
       );
-    
-      // User role update করো
       if (requestType === "chef") {
-        // Chef ID generate করো
         const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
-      
         await usersCollection.updateOne(
           { email: userEmail },
           { $set: { role: "chef", chefId: chefId } }
@@ -379,12 +322,10 @@ app.post("/jwt", async (req, res) => {
           { $set: { role: "admin" } }
         );
       }
-    
       res.send({ success: true });
     });
 
-    // Request Reject
-    app.patch("/requests/reject/:id",verifyToken, verifyAdmin,  async (req, res) => {
+    app.patch("/requests/reject/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const result = await requestsCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -393,33 +334,29 @@ app.post("/jwt", async (req, res) => {
       res.send(result);
     });
 
-    // Platform Statistics
-    app.get("/admin/statistics",verifyToken, verifyAdmin, async (req, res) => {
+    // ===== ADMIN =====
+    app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "fraud" } }
+      );
+      res.send(result);
+    });
+
+    app.get("/admin/statistics", verifyToken, verifyAdmin, async (req, res) => {
       const totalUsers = await usersCollection.countDocuments();
       const totalOrders = await ordersCollection.countDocuments();
-    
-      const pendingOrders = await ordersCollection.countDocuments({
-        orderStatus: "pending",
-      });
-      const deliveredOrders = await ordersCollection.countDocuments({
-        orderStatus: "delivered",
-      });
-      const cancelledOrders = await ordersCollection.countDocuments({
-        orderStatus: "cancelled",
-      });
-      const acceptedOrders = await ordersCollection.countDocuments({
-        orderStatus: "accepted",
-      });
-    
-      // Total payment হিসাব
+      const pendingOrders = await ordersCollection.countDocuments({ orderStatus: "pending" });
+      const deliveredOrders = await ordersCollection.countDocuments({ orderStatus: "delivered" });
+      const cancelledOrders = await ordersCollection.countDocuments({ orderStatus: "cancelled" });
+      const acceptedOrders = await ordersCollection.countDocuments({ orderStatus: "accepted" });
       const payments = await ordersCollection
         .find({ paymentStatus: "paid" })
         .toArray();
-    
-      const totalPayment = payments.reduce((sum, order) => {
-        return sum + order.price * order.quantity;
-      }, 0);
-    
+      const totalPayment = payments.reduce(
+        (sum, order) => sum + order.price * order.quantity, 0
+      );
       res.send({
         totalUsers,
         totalOrders,
@@ -431,19 +368,38 @@ app.post("/jwt", async (req, res) => {
       });
     });
 
-    
+    // ===== PAYMENTS =====
+    app.post("/create-payment-intent", verifyToken, async (req, res) => {
+      const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+      const { price } = req.body;
+      const amount = Math.round(price * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+      res.send({ clientSecret: paymentIntent.client_secret });
+    });
+
+    app.post("/payments", verifyToken, async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentsCollection.insertOne(payment);
+      await ordersCollection.updateOne(
+        { _id: new ObjectId(payment.orderId) },
+        { $set: { paymentStatus: "paid" } }
+      );
+      res.send(paymentResult);
+    });
 
     await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log("MongoDB Connected Successfully! ✅");
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
+
 run().catch(console.dir);
 
-
-
-app.listen(port, ()=>{
-    console.log(`local chef bazzar server is running on port : ${port}`)
-})
+app.listen(port, () => {
+  console.log(`Server running on port: ${port} 🚀`)
+});
