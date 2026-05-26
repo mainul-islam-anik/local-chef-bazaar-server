@@ -6,6 +6,16 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const jwt = require("jsonwebtoken");
 const app = express()
 const port = process.env.PORT || 5000;
+const admin = require("firebase-admin");
+
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 // Middleware
 app.use(cors({
@@ -23,6 +33,8 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
+
+
 
 // ✅ Collections গুলো run() এর বাইরে declare করো
 // তাহলে middleware গুলো access করতে পারবে
@@ -88,7 +100,7 @@ app.post("/jwt", (req, res) => {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     console.log('Database Connected ✅')
 
     // =====USER API========
@@ -391,8 +403,8 @@ async function run() {
       res.send(paymentResult);
     });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("MongoDB Connected Successfully! ✅");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("MongoDB Connected Successfully! ✅");
   } finally {
     // await client.close();
   }
