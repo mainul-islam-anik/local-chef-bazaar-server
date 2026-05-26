@@ -20,8 +20,9 @@ admin.initializeApp({
 // Middleware
 app.use(cors({
   origin: [
-    // "http://localhost:5173",
-    "https://local-chef-bazaar-server-inky.vercel.app/"
+    "http://localhost:5173",
+    "https://local-chef-bazaar-958e3.web.app",        // ✅ আপনার Firebase URL
+    "https://local-chef-bazaar-958e3.firebaseapp.com", // ✅ Firebase default URL
   ],
   credentials: true,
 }));
