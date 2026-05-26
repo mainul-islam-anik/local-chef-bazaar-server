@@ -19,7 +19,10 @@ admin.initializeApp({
 
 // Middleware
 app.use(cors({
-  origin: ["http://localhost:5173"],
+  origin: [
+    // "http://localhost:5173",
+    "https://local-chef-bazaar-server-inky.vercel.app/"
+  ],
   credentials: true,
 }));
 app.use(express.json())
