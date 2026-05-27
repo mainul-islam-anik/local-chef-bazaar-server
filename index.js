@@ -6,23 +6,13 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const jwt = require("jsonwebtoken");
 const app = express()
 const port = process.env.PORT || 5000;
-const admin = require("firebase-admin");
-
-
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
-const serviceAccount = JSON.parse(decoded);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
 
 // Middleware
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://local-chef-bazaar-958e3.web.app",        // ✅ আপনার Firebase URL
-    "https://local-chef-bazaar-958e3.firebaseapp.com", // ✅ Firebase default URL
+    "https://local-chef-bazaar-958e3.web.app",
+    "https://local-chef-bazaar-958e3.firebaseapp.com",
   ],
   credentials: true,
 }));
@@ -37,19 +27,6 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
-
-
-
-// ✅ Collections গুলো run() এর বাইরে declare করো
-// তাহলে middleware গুলো access করতে পারবে
-const db = client.db('localChef_db');
-const usersCollection = db.collection('users')
-const mealsCollection = db.collection('meals')
-const reviewsCollection = db.collection('reviews')
-const ordersCollection = db.collection("orders");
-const favoritesCollection = db.collection("favorites");
-const requestsCollection = db.collection("requests");
-const paymentsCollection = db.collection("payments");
 
 // ===== JWT Middleware =====
 const verifyToken = (req, res, next) => {
@@ -67,31 +44,10 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// ✅ Admin verify — এখন usersCollection access করতে পারবে
-const verifyAdmin = async (req, res, next) => {
-  const email = req.decoded.email;
-  const user = await usersCollection.findOne({ email });
-  if (user?.role !== "admin") {
-    return res.status(403).send({ message: "Forbidden access" });
-  }
-  next();
-};
-
-// ✅ Chef verify — এখন usersCollection access করতে পারবে
-const verifyChef = async (req, res, next) => {
-  const email = req.decoded.email;
-  const user = await usersCollection.findOne({ email });
-  if (user?.role !== "chef") {
-    return res.status(403).send({ message: "Forbidden access" });
-  }
-  next();
-};
-
 app.get('/', (req, res) => {
-  res.send('local chef bazaar server is running')
+  res.send('local chef bazaar server is running ✅')
 });
 
-// ✅ JWT route — run() এর বাইরে
 app.post("/jwt", (req, res) => {
   const { email } = req.body;
   const token = jwt.sign(
@@ -104,10 +60,41 @@ app.post("/jwt", (req, res) => {
 
 async function run() {
   try {
-    // await client.connect();
+    // ✅ connect() uncomment করা হয়েছে
+    await client.connect();
     console.log('Database Connected ✅')
 
-    // =====USER API========
+    const db = client.db('localChef_db');
+
+    // ✅ সব collections run() এর ভেতরে
+    const usersCollection = db.collection('users');
+    const mealsCollection = db.collection('meals');
+    const reviewsCollection = db.collection('reviews');
+    const ordersCollection = db.collection("orders");
+    const favoritesCollection = db.collection("favorites");
+    const requestsCollection = db.collection("requests");
+    const paymentsCollection = db.collection("payments");
+
+    // ✅ verifyAdmin এবং verifyChef run() এর ভেতরে
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "admin") {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      next();
+    };
+
+    const verifyChef = async (req, res, next) => {
+      const email = req.decoded.email;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "chef") {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      next();
+    };
+
+    // ===== USERS =====
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.createdAt = new Date();
@@ -128,58 +115,68 @@ async function run() {
       res.send(result);
     });
 
+    app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "fraud" } }
+      );
+      res.send(result);
+    });
+
     // ===== MEALS =====
     app.get('/daily-meals', async (req, res) => {
-      const cursor = mealsCollection.find().sort({ createdAt: 1 }).limit(6);
-      const result = await cursor.toArray();
+      const result = await mealsCollection
+        .find()
+        .sort({ createdAt: 1 })
+        .limit(6)
+        .toArray();
       res.send(result);
     });
 
+    // ✅ Search সহ meals route
     app.get("/meals", async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = parseInt(req.query.skip) || 0;
-    const sort = req.query.sort;
-    const search = req.query.search || "";
+      try {
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = parseInt(req.query.skip) || 0;
+        const sort = req.query.sort;
+        const search = req.query.search || "";
 
-    let sortOption = {};
-    if (sort === "asc") sortOption = { price: 1 };
-    if (sort === "desc") sortOption = { price: -1 };
+        let sortOption = {};
+        if (sort === "asc") sortOption = { price: 1 };
+        if (sort === "desc") sortOption = { price: -1 };
 
-    // ✅ Search filter
-    let searchFilter = {};
-    if (search && search.trim() !== "") {
-      searchFilter = {
-        $or: [
-          { foodName: { $regex: search.trim(), $options: "i" } },
-          { chefName: { $regex: search.trim(), $options: "i" } },
-        ],
-      };
-    }
+        let searchFilter = {};
+        if (search && search.trim() !== "") {
+          searchFilter = {
+            $or: [
+              { foodName: { $regex: search.trim(), $options: "i" } },
+              { chefName: { $regex: search.trim(), $options: "i" } },
+            ],
+          };
+        }
 
-    const total = await mealsCollection.countDocuments(searchFilter);
-    const meals = await mealsCollection
-      .find(searchFilter)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(limit)
-      .toArray();
+        const total = await mealsCollection.countDocuments(searchFilter);
+        const meals = await mealsCollection
+          .find(searchFilter)
+          .sort(sortOption)
+          .skip(skip)
+          .limit(limit)
+          .toArray();
 
-    res.send({ meals, total });
-  } catch (error) {
-    console.error("Meals error:", error);
-    res.status(500).send({ message: "Something went wrong" });
-  }
-});
+        res.send({ meals, total });
+      } catch (error) {
+        console.error("Meals error:", error);
+        res.status(500).send({ message: "Something went wrong" });
+      }
+    });
+
     app.get("/meals/:id", async (req, res) => {
       const id = req.params.id;
-      const result = await mealsCollection.findOne({
-        _id: new ObjectId(id),
-      });
+      const result = await mealsCollection.findOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
-    // ✅ verifyChef এখন কাজ করবে
     app.post("/meals", verifyToken, verifyChef, async (req, res) => {
       const meal = req.body;
       const result = await mealsCollection.insertOne(meal);
@@ -196,9 +193,7 @@ async function run() {
 
     app.delete("/meals/:id", async (req, res) => {
       const id = req.params.id;
-      const result = await mealsCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
+      const result = await mealsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
@@ -214,8 +209,11 @@ async function run() {
 
     // ===== REVIEWS =====
     app.get("/reviews", async (req, res) => {
-      const cursor = reviewsCollection.find().sort({ date: 1 }).limit(6);
-      const result = await cursor.toArray();
+      const result = await reviewsCollection
+        .find()
+        .sort({ date: 1 })
+        .limit(6)
+        .toArray();
       res.send(result);
     });
 
@@ -233,11 +231,9 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/reviews/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await reviewsCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
+    app.post("/reviews", verifyToken, async (req, res) => {
+      const review = req.body;
+      const result = await reviewsCollection.insertOne(review);
       res.send(result);
     });
 
@@ -251,9 +247,9 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/reviews", verifyToken, async (req, res) => {
-      const review = req.body;
-      const result = await reviewsCollection.insertOne(review);
+    app.delete("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await reviewsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
@@ -315,9 +311,7 @@ async function run() {
 
     app.delete("/favorites/:id", async (req, res) => {
       const id = req.params.id;
-      const result = await favoritesCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
+      const result = await favoritesCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
@@ -349,7 +343,7 @@ async function run() {
         const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
         await usersCollection.updateOne(
           { email: userEmail },
-          { $set: { role: "chef", chefId: chefId } }
+          { $set: { role: "chef", chefId } }
         );
       } else if (requestType === "admin") {
         await usersCollection.updateOne(
@@ -369,16 +363,7 @@ async function run() {
       res.send(result);
     });
 
-    // ===== ADMIN =====
-    app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await usersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: "fraud" } }
-      );
-      res.send(result);
-    });
-
+    // ===== ADMIN STATISTICS =====
     app.get("/admin/statistics", verifyToken, verifyAdmin, async (req, res) => {
       const totalUsers = await usersCollection.countDocuments();
       const totalOrders = await ordersCollection.countDocuments();
@@ -426,14 +411,14 @@ async function run() {
       res.send(paymentResult);
     });
 
-    // await client.db("admin").command({ ping: 1 });
-    // console.log("MongoDB Connected Successfully! ✅");
-  } finally {
-    // await client.close();
+    console.log("All routes ready ✅");
+
+  } catch (error) {
+    console.error("Server error:", error);
   }
 }
 
-run().catch(console.dir);
+run();
 
 app.listen(port, () => {
   console.log(`Server running on port: ${port} 🚀`)
