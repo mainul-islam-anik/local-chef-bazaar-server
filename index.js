@@ -139,12 +139,23 @@ async function run() {
       const limit = parseInt(req.query.limit) || 10;
       const skip = parseInt(req.query.skip) || 0;
       const sort = req.query.sort;
+      const search = req.query.search || ""; // ✅ search query
+
       let sortOption = {};
       if (sort === "asc") sortOption = { price: 1 };
       if (sort === "desc") sortOption = { price: -1 };
+      // ✅ Search filter — foodName বা chefName এ search করবে
+      const searchFilter = search
+      ? {
+        $or: [
+          { foodName: { $regex: search, $options: "i" } },
+          { chefName: { $regex: search, $options: "i" } },
+        ],
+      }
+      : {};
       const total = await mealsCollection.countDocuments();
       const meals = await mealsCollection
-        .find()
+        .find(searchFilter)
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
