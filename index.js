@@ -136,33 +136,41 @@ async function run() {
     });
 
     app.get("/meals", async (req, res) => {
-      const limit = parseInt(req.query.limit) || 10;
-      const skip = parseInt(req.query.skip) || 0;
-      const sort = req.query.sort;
-      const search = req.query.search || ""; // ✅ search query
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = parseInt(req.query.skip) || 0;
+    const sort = req.query.sort;
+    const search = req.query.search || "";
 
-      let sortOption = {};
-      if (sort === "asc") sortOption = { price: 1 };
-      if (sort === "desc") sortOption = { price: -1 };
-      // ✅ Search filter — foodName বা chefName এ search করবে
-      const searchFilter = search
-      ? {
+    let sortOption = {};
+    if (sort === "asc") sortOption = { price: 1 };
+    if (sort === "desc") sortOption = { price: -1 };
+
+    // ✅ Search filter
+    let searchFilter = {};
+    if (search && search.trim() !== "") {
+      searchFilter = {
         $or: [
-          { foodName: { $regex: search, $options: "i" } },
-          { chefName: { $regex: search, $options: "i" } },
+          { foodName: { $regex: search.trim(), $options: "i" } },
+          { chefName: { $regex: search.trim(), $options: "i" } },
         ],
-      }
-      : {};
-      const total = await mealsCollection.countDocuments();
-      const meals = await mealsCollection
-        .find(searchFilter)
-        .sort(sortOption)
-        .skip(skip)
-        .limit(limit)
-        .toArray();
-      res.send({ meals, total });
-    });
+      };
+    }
 
+    const total = await mealsCollection.countDocuments(searchFilter);
+    const meals = await mealsCollection
+      .find(searchFilter)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.send({ meals, total });
+  } catch (error) {
+    console.error("Meals error:", error);
+    res.status(500).send({ message: "Something went wrong" });
+  }
+});
     app.get("/meals/:id", async (req, res) => {
       const id = req.params.id;
       const result = await mealsCollection.findOne({
