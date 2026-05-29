@@ -7,7 +7,6 @@ const jwt = require("jsonwebtoken");
 const app = express()
 const port = process.env.PORT || 5000;
 
-// Middleware
 app.use(cors({
   origin: [
     "http://localhost:5173",
@@ -20,13 +19,29 @@ app.use(express.json())
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.4di52mx.mongodb.net/?appName=Cluster0`;
 
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
+// ✅ Connection cache — Vercel cold start fix
+let cachedClient = null;
+
+async function connectDB() {
+  if (cachedClient) {
+    return cachedClient.db('localChef_db');
   }
-});
+
+  const client = new MongoClient(uri, {
+    serverApi: {
+      version: ServerApiVersion.v1,
+      strict: true,
+      deprecationErrors: true,
+    },
+    maxPoolSize: 10,
+  });
+
+  // ✅ connect() এখানে আছে — comment করা নেই
+  await client.connect();
+  cachedClient = client;
+  console.log('MongoDB Connected ✅');
+  return client.db('localChef_db');
+}
 
 // ===== JWT Middleware =====
 const verifyToken = (req, res, next) => {
@@ -60,13 +75,9 @@ app.post("/jwt", (req, res) => {
 
 async function run() {
   try {
-    // ✅ connect() uncomment করা হয়েছে
-    await client.connect();
-    console.log('Database Connected ✅')
+    // ✅ Cached connection
+    const db = await connectDB();
 
-    const db = client.db('localChef_db');
-
-    // ✅ সব collections run() এর ভেতরে
     const usersCollection = db.collection('users');
     const mealsCollection = db.collection('meals');
     const reviewsCollection = db.collection('reviews');
@@ -75,7 +86,6 @@ async function run() {
     const requestsCollection = db.collection("requests");
     const paymentsCollection = db.collection("payments");
 
-    // ✅ verifyAdmin এবং verifyChef run() এর ভেতরে
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded.email;
       const user = await usersCollection.findOne({ email });
@@ -96,49 +106,52 @@ async function run() {
 
     // ===== USERS =====
     app.post("/users", async (req, res) => {
-      const user = req.body;
-      user.createdAt = new Date();
-      const exists = await usersCollection.findOne({ email: user.email });
-      if (exists) return res.send({ message: "User already exists" });
-      const result = await usersCollection.insertOne(user);
-      res.send(result);
+      try {
+        const user = req.body;
+        user.createdAt = new Date();
+        const exists = await usersCollection.findOne({ email: user.email });
+        if (exists) return res.send({ message: "User already exists" });
+        const result = await usersCollection.insertOne(user);
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
-      const result = await usersCollection.find().toArray();
-      res.send(result);
+      try {
+        const result = await usersCollection.find().toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/users/:email", async (req, res) => {
-      const email = req.params.email;
-      const result = await usersCollection.findOne({ email });
-      res.send(result);
+      try {
+        const result = await usersCollection.findOne({ email: req.params.email });
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await usersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: "fraud" } }
-      );
-      res.send(result);
+      try {
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { status: "fraud" } }
+        );
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== MEALS =====
     app.get('/daily-meals', async (req, res) => {
-  try {
-    const result = await mealsCollection
-      .find()
-      .sort({ createdAt: 1 })
-      .limit(6)
-      .toArray();
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({ message: "Something went wrong" });
-  }
-});
+      try {
+        const result = await mealsCollection
+          .find()
+          .sort({ createdAt: 1 })
+          .limit(6)
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
+    });
 
-    // ✅ Search সহ meals route
     app.get("/meals", async (req, res) => {
       try {
         const limit = parseInt(req.query.limit) || 10;
@@ -169,250 +182,267 @@ async function run() {
           .toArray();
 
         res.send({ meals, total });
-      } catch (error) {
-        console.error("Meals error:", error);
-        res.status(500).send({ message: "Something went wrong" });
-      }
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/meals/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await mealsCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+      try {
+        const result = await mealsCollection.findOne({ _id: new ObjectId(req.params.id) });
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.post("/meals", verifyToken, verifyChef, async (req, res) => {
-      const meal = req.body;
-      const result = await mealsCollection.insertOne(meal);
-      res.send(result);
+      try {
+        const result = await mealsCollection.insertOne(req.body);
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/my-meals/:email", async (req, res) => {
-      const email = req.params.email;
-      const result = await mealsCollection
-        .find({ userEmail: email })
-        .toArray();
-      res.send(result);
+      try {
+        const result = await mealsCollection
+          .find({ userEmail: req.params.email })
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.delete("/meals/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await mealsCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result);
+      try {
+        const result = await mealsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.patch("/meals/:id", async (req, res) => {
-      const id = req.params.id;
-      const updatedData = req.body;
-      const result = await mealsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updatedData }
-      );
-      res.send(result);
+      try {
+        const result = await mealsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: req.body }
+        );
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== REVIEWS =====
     app.get("/reviews", async (req, res) => {
-      const result = await reviewsCollection
-        .find()
-        .sort({ date: 1 })
-        .limit(6)
-        .toArray();
-      res.send(result);
+      try {
+        const result = await reviewsCollection
+          .find()
+          .sort({ date: 1 })
+          .limit(6)
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/reviews/:foodId", async (req, res) => {
-      const foodId = req.params.foodId;
-      const result = await reviewsCollection.find({ foodId }).toArray();
-      res.send(result);
+      try {
+        const result = await reviewsCollection
+          .find({ foodId: req.params.foodId })
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/my-reviews/:email", async (req, res) => {
-      const email = req.params.email;
-      const result = await reviewsCollection
-        .find({ reviewerEmail: email })
-        .toArray();
-      res.send(result);
+      try {
+        const result = await reviewsCollection
+          .find({ reviewerEmail: req.params.email })
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.post("/reviews", verifyToken, async (req, res) => {
-      const review = req.body;
-      const result = await reviewsCollection.insertOne(review);
-      res.send(result);
+      try {
+        const result = await reviewsCollection.insertOne(req.body);
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.patch("/reviews/:id", async (req, res) => {
-      const id = req.params.id;
-      const { rating, comment } = req.body;
-      const result = await reviewsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { rating, comment } }
-      );
-      res.send(result);
+      try {
+        const { rating, comment } = req.body;
+        const result = await reviewsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { rating, comment } }
+        );
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.delete("/reviews/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await reviewsCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result);
+      try {
+        const result = await reviewsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== ORDERS =====
     app.post("/orders", verifyToken, async (req, res) => {
-      const order = req.body;
-      const result = await ordersCollection.insertOne(order);
-      res.send(result);
+      try {
+        const result = await ordersCollection.insertOne(req.body);
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/orders/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-      if (req.decoded.email !== email) {
-        return res.status(403).send({ message: "Forbidden access" });
-      }
-      const result = await ordersCollection
-        .find({ userEmail: email })
-        .toArray();
-      res.send(result);
+      try {
+        const email = req.params.email;
+        if (req.decoded.email !== email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+        const result = await ordersCollection
+          .find({ userEmail: email })
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/chef-orders/:chefId", async (req, res) => {
-      const chefId = req.params.chefId;
-      const result = await ordersCollection
-        .find({ chefId: chefId })
-        .toArray();
-      res.send(result);
+      try {
+        const result = await ordersCollection
+          .find({ chefId: req.params.chefId })
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.patch("/orders/update-status/:id", async (req, res) => {
-      const id = req.params.id;
-      const { orderStatus } = req.body;
-      const result = await ordersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { orderStatus } }
-      );
-      res.send(result);
+      try {
+        const result = await ordersCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { orderStatus: req.body.orderStatus } }
+        );
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== FAVORITES =====
     app.post("/favorites", verifyToken, async (req, res) => {
-      const fav = req.body;
-      const exists = await favoritesCollection.findOne({
-        userEmail: fav.userEmail,
-        mealId: fav.mealId,
-      });
-      if (exists) return res.send({ message: "Already in favorites" });
-      const result = await favoritesCollection.insertOne(fav);
-      res.send(result);
+      try {
+        const fav = req.body;
+        const exists = await favoritesCollection.findOne({
+          userEmail: fav.userEmail,
+          mealId: fav.mealId,
+        });
+        if (exists) return res.send({ message: "Already in favorites" });
+        const result = await favoritesCollection.insertOne(fav);
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/favorites/:email", async (req, res) => {
-      const email = req.params.email;
-      const result = await favoritesCollection
-        .find({ userEmail: email })
-        .toArray();
-      res.send(result);
+      try {
+        const result = await favoritesCollection
+          .find({ userEmail: req.params.email })
+          .toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.delete("/favorites/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await favoritesCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result);
+      try {
+        const result = await favoritesCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== REQUESTS =====
     app.post("/requests", async (req, res) => {
-      const request = req.body;
-      const exists = await requestsCollection.findOne({
-        userEmail: request.userEmail,
-        requestStatus: "pending",
-      });
-      if (exists) return res.send({ message: "Already has pending request" });
-      const result = await requestsCollection.insertOne(request);
-      res.send(result);
+      try {
+        const request = req.body;
+        const exists = await requestsCollection.findOne({
+          userEmail: request.userEmail,
+          requestStatus: "pending",
+        });
+        if (exists) return res.send({ message: "Already has pending request" });
+        const result = await requestsCollection.insertOne(request);
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.get("/requests", verifyToken, verifyAdmin, async (req, res) => {
-      const result = await requestsCollection.find().toArray();
-      res.send(result);
+      try {
+        const result = await requestsCollection.find().toArray();
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.patch("/requests/accept/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const { userEmail, requestType } = req.body;
-      await requestsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { requestStatus: "approved" } }
-      );
-      if (requestType === "chef") {
-        const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
-        await usersCollection.updateOne(
-          { email: userEmail },
-          { $set: { role: "chef", chefId } }
+      try {
+        const { userEmail, requestType } = req.body;
+        await requestsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { requestStatus: "approved" } }
         );
-      } else if (requestType === "admin") {
-        await usersCollection.updateOne(
-          { email: userEmail },
-          { $set: { role: "admin" } }
-        );
-      }
-      res.send({ success: true });
+        if (requestType === "chef") {
+          const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
+          await usersCollection.updateOne(
+            { email: userEmail },
+            { $set: { role: "chef", chefId } }
+          );
+        } else if (requestType === "admin") {
+          await usersCollection.updateOne(
+            { email: userEmail },
+            { $set: { role: "admin" } }
+          );
+        }
+        res.send({ success: true });
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.patch("/requests/reject/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await requestsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { requestStatus: "rejected" } }
-      );
-      res.send(result);
+      try {
+        const result = await requestsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { requestStatus: "rejected" } }
+        );
+        res.send(result);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== ADMIN STATISTICS =====
     app.get("/admin/statistics", verifyToken, verifyAdmin, async (req, res) => {
-      const totalUsers = await usersCollection.countDocuments();
-      const totalOrders = await ordersCollection.countDocuments();
-      const pendingOrders = await ordersCollection.countDocuments({ orderStatus: "pending" });
-      const deliveredOrders = await ordersCollection.countDocuments({ orderStatus: "delivered" });
-      const cancelledOrders = await ordersCollection.countDocuments({ orderStatus: "cancelled" });
-      const acceptedOrders = await ordersCollection.countDocuments({ orderStatus: "accepted" });
-      const payments = await ordersCollection
-        .find({ paymentStatus: "paid" })
-        .toArray();
-      const totalPayment = payments.reduce(
-        (sum, order) => sum + order.price * order.quantity, 0
-      );
-      res.send({
-        totalUsers,
-        totalOrders,
-        pendingOrders,
-        deliveredOrders,
-        cancelledOrders,
-        acceptedOrders,
-        totalPayment,
-      });
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const totalOrders = await ordersCollection.countDocuments();
+        const pendingOrders = await ordersCollection.countDocuments({ orderStatus: "pending" });
+        const deliveredOrders = await ordersCollection.countDocuments({ orderStatus: "delivered" });
+        const cancelledOrders = await ordersCollection.countDocuments({ orderStatus: "cancelled" });
+        const acceptedOrders = await ordersCollection.countDocuments({ orderStatus: "accepted" });
+        const payments = await ordersCollection.find({ paymentStatus: "paid" }).toArray();
+        const totalPayment = payments.reduce((sum, o) => sum + o.price * o.quantity, 0);
+        res.send({ totalUsers, totalOrders, pendingOrders, deliveredOrders, cancelledOrders, acceptedOrders, totalPayment });
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     // ===== PAYMENTS =====
     app.post("/create-payment-intent", verifyToken, async (req, res) => {
-      const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-      const { price } = req.body;
-      const amount = Math.round(price * 100);
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount,
-        currency: "usd",
-        payment_method_types: ["card"],
-      });
-      res.send({ clientSecret: paymentIntent.client_secret });
+      try {
+        const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+        const amount = Math.round(req.body.price * 100);
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     app.post("/payments", verifyToken, async (req, res) => {
-      const payment = req.body;
-      const paymentResult = await paymentsCollection.insertOne(payment);
-      await ordersCollection.updateOne(
-        { _id: new ObjectId(payment.orderId) },
-        { $set: { paymentStatus: "paid" } }
-      );
-      res.send(paymentResult);
+      try {
+        const payment = req.body;
+        const paymentResult = await paymentsCollection.insertOne(payment);
+        await ordersCollection.updateOne(
+          { _id: new ObjectId(payment.orderId) },
+          { $set: { paymentStatus: "paid" } }
+        );
+        res.send(paymentResult);
+      } catch (e) { res.status(500).send({ message: e.message }); }
     });
 
     console.log("All routes ready ✅");
@@ -426,4 +456,4 @@ run();
 
 app.listen(port, () => {
   console.log(`Server running on port: ${port} 🚀`)
-});"// $(date)" 
+});
