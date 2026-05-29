@@ -1,9 +1,9 @@
 const express = require('express')
 const cors = require('cors')
 require('dotenv').config()
-const { ObjectId } = require('mongodb');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { ObjectId, MongoClient, ServerApiVersion } = require('mongodb');
 const jwt = require("jsonwebtoken");
+
 const app = express()
 const port = process.env.PORT || 5000;
 
@@ -19,29 +19,36 @@ app.use(express.json())
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.4di52mx.mongodb.net/?appName=Cluster0`;
 
-// ✅ Connection cache — Vercel cold start fix
-let cachedClient = null;
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+  maxPoolSize: 10,
+});
 
-async function connectDB() {
-  if (cachedClient) {
-    return cachedClient.db('localChef_db');
-  }
+// Collections — globally defined
+let usersCollection;
+let mealsCollection;
+let reviewsCollection;
+let ordersCollection;
+let favoritesCollection;
+let requestsCollection;
+let paymentsCollection;
 
-  const client = new MongoClient(uri, {
-    serverApi: {
-      version: ServerApiVersion.v1,
-      strict: true,
-      deprecationErrors: true,
-    },
-    maxPoolSize: 10,
-  });
-
-  // ✅ connect() এখানে আছে — comment করা নেই
-  await client.connect();
-  cachedClient = client;
+// ✅ Connect once
+client.connect().then(() => {
+  const db = client.db('localChef_db');
+  usersCollection = db.collection('users');
+  mealsCollection = db.collection('meals');
+  reviewsCollection = db.collection('reviews');
+  ordersCollection = db.collection("orders");
+  favoritesCollection = db.collection("favorites");
+  requestsCollection = db.collection("requests");
+  paymentsCollection = db.collection("payments");
   console.log('MongoDB Connected ✅');
-  return client.db('localChef_db');
-}
+}).catch(console.error);
 
 // ===== JWT Middleware =====
 const verifyToken = (req, res, next) => {
@@ -51,409 +58,291 @@ const verifyToken = (req, res, next) => {
   }
   const token = authHeader.split(" ")[1];
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).send({ message: "Unauthorized access" });
-    }
+    if (err) return res.status(401).send({ message: "Unauthorized access" });
     req.decoded = decoded;
     next();
   });
 };
 
-app.get('/', (req, res) => {
-  res.send('local chef bazaar server is running ✅')
-});
+const verifyAdmin = async (req, res, next) => {
+  const user = await usersCollection.findOne({ email: req.decoded.email });
+  if (user?.role !== "admin") return res.status(403).send({ message: "Forbidden" });
+  next();
+};
+
+const verifyChef = async (req, res, next) => {
+  const user = await usersCollection.findOne({ email: req.decoded.email });
+  if (user?.role !== "chef") return res.status(403).send({ message: "Forbidden" });
+  next();
+};
+
+// ===== ROUTES =====
+app.get('/', (req, res) => res.send('LocalChefBazaar Server Running ✅'));
 
 app.post("/jwt", (req, res) => {
-  const { email } = req.body;
-  const token = jwt.sign(
-    { email },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
+  const token = jwt.sign({ email: req.body.email }, process.env.JWT_SECRET, { expiresIn: "7d" });
   res.send({ token });
 });
 
-async function run() {
+// USERS
+app.post("/users", async (req, res) => {
   try {
-    // ✅ Cached connection
-    const db = await connectDB();
-
-    const usersCollection = db.collection('users');
-    const mealsCollection = db.collection('meals');
-    const reviewsCollection = db.collection('reviews');
-    const ordersCollection = db.collection("orders");
-    const favoritesCollection = db.collection("favorites");
-    const requestsCollection = db.collection("requests");
-    const paymentsCollection = db.collection("payments");
-
-    const verifyAdmin = async (req, res, next) => {
-      const email = req.decoded.email;
-      const user = await usersCollection.findOne({ email });
-      if (user?.role !== "admin") {
-        return res.status(403).send({ message: "Forbidden access" });
-      }
-      next();
-    };
-
-    const verifyChef = async (req, res, next) => {
-      const email = req.decoded.email;
-      const user = await usersCollection.findOne({ email });
-      if (user?.role !== "chef") {
-        return res.status(403).send({ message: "Forbidden access" });
-      }
-      next();
-    };
-
-    // ===== USERS =====
-    app.post("/users", async (req, res) => {
-      try {
-        const user = req.body;
-        user.createdAt = new Date();
-        const exists = await usersCollection.findOne({ email: user.email });
-        if (exists) return res.send({ message: "User already exists" });
-        const result = await usersCollection.insertOne(user);
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const result = await usersCollection.find().toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/users/:email", async (req, res) => {
-      try {
-        const result = await usersCollection.findOne({ email: req.params.email });
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { status: "fraud" } }
-        );
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== MEALS =====
-    app.get('/daily-meals', async (req, res) => {
-      try {
-        const result = await mealsCollection
-          .find()
-          .sort({ createdAt: 1 })
-          .limit(6)
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/meals", async (req, res) => {
-      try {
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = parseInt(req.query.skip) || 0;
-        const sort = req.query.sort;
-        const search = req.query.search || "";
-
-        let sortOption = {};
-        if (sort === "asc") sortOption = { price: 1 };
-        if (sort === "desc") sortOption = { price: -1 };
-
-        let searchFilter = {};
-        if (search && search.trim() !== "") {
-          searchFilter = {
-            $or: [
-              { foodName: { $regex: search.trim(), $options: "i" } },
-              { chefName: { $regex: search.trim(), $options: "i" } },
-            ],
-          };
-        }
-
-        const total = await mealsCollection.countDocuments(searchFilter);
-        const meals = await mealsCollection
-          .find(searchFilter)
-          .sort(sortOption)
-          .skip(skip)
-          .limit(limit)
-          .toArray();
-
-        res.send({ meals, total });
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/meals/:id", async (req, res) => {
-      try {
-        const result = await mealsCollection.findOne({ _id: new ObjectId(req.params.id) });
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.post("/meals", verifyToken, verifyChef, async (req, res) => {
-      try {
-        const result = await mealsCollection.insertOne(req.body);
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/my-meals/:email", async (req, res) => {
-      try {
-        const result = await mealsCollection
-          .find({ userEmail: req.params.email })
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.delete("/meals/:id", async (req, res) => {
-      try {
-        const result = await mealsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.patch("/meals/:id", async (req, res) => {
-      try {
-        const result = await mealsCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: req.body }
-        );
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== REVIEWS =====
-    app.get("/reviews", async (req, res) => {
-      try {
-        const result = await reviewsCollection
-          .find()
-          .sort({ date: 1 })
-          .limit(6)
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/reviews/:foodId", async (req, res) => {
-      try {
-        const result = await reviewsCollection
-          .find({ foodId: req.params.foodId })
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/my-reviews/:email", async (req, res) => {
-      try {
-        const result = await reviewsCollection
-          .find({ reviewerEmail: req.params.email })
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.post("/reviews", verifyToken, async (req, res) => {
-      try {
-        const result = await reviewsCollection.insertOne(req.body);
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.patch("/reviews/:id", async (req, res) => {
-      try {
-        const { rating, comment } = req.body;
-        const result = await reviewsCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { rating, comment } }
-        );
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.delete("/reviews/:id", async (req, res) => {
-      try {
-        const result = await reviewsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== ORDERS =====
-    app.post("/orders", verifyToken, async (req, res) => {
-      try {
-        const result = await ordersCollection.insertOne(req.body);
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/orders/:email", verifyToken, async (req, res) => {
-      try {
-        const email = req.params.email;
-        if (req.decoded.email !== email) {
-          return res.status(403).send({ message: "Forbidden access" });
-        }
-        const result = await ordersCollection
-          .find({ userEmail: email })
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/chef-orders/:chefId", async (req, res) => {
-      try {
-        const result = await ordersCollection
-          .find({ chefId: req.params.chefId })
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.patch("/orders/update-status/:id", async (req, res) => {
-      try {
-        const result = await ordersCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { orderStatus: req.body.orderStatus } }
-        );
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== FAVORITES =====
-    app.post("/favorites", verifyToken, async (req, res) => {
-      try {
-        const fav = req.body;
-        const exists = await favoritesCollection.findOne({
-          userEmail: fav.userEmail,
-          mealId: fav.mealId,
-        });
-        if (exists) return res.send({ message: "Already in favorites" });
-        const result = await favoritesCollection.insertOne(fav);
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/favorites/:email", async (req, res) => {
-      try {
-        const result = await favoritesCollection
-          .find({ userEmail: req.params.email })
-          .toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.delete("/favorites/:id", async (req, res) => {
-      try {
-        const result = await favoritesCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== REQUESTS =====
-    app.post("/requests", async (req, res) => {
-      try {
-        const request = req.body;
-        const exists = await requestsCollection.findOne({
-          userEmail: request.userEmail,
-          requestStatus: "pending",
-        });
-        if (exists) return res.send({ message: "Already has pending request" });
-        const result = await requestsCollection.insertOne(request);
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.get("/requests", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const result = await requestsCollection.find().toArray();
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.patch("/requests/accept/:id", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const { userEmail, requestType } = req.body;
-        await requestsCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { requestStatus: "approved" } }
-        );
-        if (requestType === "chef") {
-          const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
-          await usersCollection.updateOne(
-            { email: userEmail },
-            { $set: { role: "chef", chefId } }
-          );
-        } else if (requestType === "admin") {
-          await usersCollection.updateOne(
-            { email: userEmail },
-            { $set: { role: "admin" } }
-          );
-        }
-        res.send({ success: true });
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.patch("/requests/reject/:id", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const result = await requestsCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { requestStatus: "rejected" } }
-        );
-        res.send(result);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== ADMIN STATISTICS =====
-    app.get("/admin/statistics", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const totalUsers = await usersCollection.countDocuments();
-        const totalOrders = await ordersCollection.countDocuments();
-        const pendingOrders = await ordersCollection.countDocuments({ orderStatus: "pending" });
-        const deliveredOrders = await ordersCollection.countDocuments({ orderStatus: "delivered" });
-        const cancelledOrders = await ordersCollection.countDocuments({ orderStatus: "cancelled" });
-        const acceptedOrders = await ordersCollection.countDocuments({ orderStatus: "accepted" });
-        const payments = await ordersCollection.find({ paymentStatus: "paid" }).toArray();
-        const totalPayment = payments.reduce((sum, o) => sum + o.price * o.quantity, 0);
-        res.send({ totalUsers, totalOrders, pendingOrders, deliveredOrders, cancelledOrders, acceptedOrders, totalPayment });
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    // ===== PAYMENTS =====
-    app.post("/create-payment-intent", verifyToken, async (req, res) => {
-      try {
-        const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-        const amount = Math.round(req.body.price * 100);
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount,
-          currency: "usd",
-          payment_method_types: ["card"],
-        });
-        res.send({ clientSecret: paymentIntent.client_secret });
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    app.post("/payments", verifyToken, async (req, res) => {
-      try {
-        const payment = req.body;
-        const paymentResult = await paymentsCollection.insertOne(payment);
-        await ordersCollection.updateOne(
-          { _id: new ObjectId(payment.orderId) },
-          { $set: { paymentStatus: "paid" } }
-        );
-        res.send(paymentResult);
-      } catch (e) { res.status(500).send({ message: e.message }); }
-    });
-
-    console.log("All routes ready ✅");
-
-  } catch (error) {
-    console.error("Server error:", error);
-  }
-}
-
-run();
-
-app.listen(port, () => {
-  console.log(`Server running on port: ${port} 🚀`)
+    const user = req.body;
+    user.createdAt = new Date();
+    const exists = await usersCollection.findOne({ email: user.email });
+    if (exists) return res.send({ message: "User already exists" });
+    res.send(await usersCollection.insertOne(user));
+  } catch (e) { res.status(500).send({ message: e.message }); }
 });
+
+app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+  try { res.send(await usersCollection.find().toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/users/:email", async (req, res) => {
+  try { res.send(await usersCollection.findOne({ email: req.params.email })); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    res.send(await usersCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: "fraud" } }
+    ));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// MEALS
+app.get('/daily-meals', async (req, res) => {
+  try {
+    res.send(await mealsCollection.find().sort({ createdAt: 1 }).limit(6).toArray());
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/meals", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = parseInt(req.query.skip) || 0;
+    const sort = req.query.sort;
+    const search = req.query.search || "";
+
+    let sortOption = {};
+    if (sort === "asc") sortOption = { price: 1 };
+    if (sort === "desc") sortOption = { price: -1 };
+
+    let searchFilter = {};
+    if (search.trim()) {
+      searchFilter = {
+        $or: [
+          { foodName: { $regex: search.trim(), $options: "i" } },
+          { chefName: { $regex: search.trim(), $options: "i" } },
+        ],
+      };
+    }
+
+    const total = await mealsCollection.countDocuments(searchFilter);
+    const meals = await mealsCollection.find(searchFilter).sort(sortOption).skip(skip).limit(limit).toArray();
+    res.send({ meals, total });
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/meals/:id", async (req, res) => {
+  try { res.send(await mealsCollection.findOne({ _id: new ObjectId(req.params.id) })); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.post("/meals", verifyToken, verifyChef, async (req, res) => {
+  try { res.send(await mealsCollection.insertOne(req.body)); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/my-meals/:email", async (req, res) => {
+  try { res.send(await mealsCollection.find({ userEmail: req.params.email }).toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.delete("/meals/:id", async (req, res) => {
+  try { res.send(await mealsCollection.deleteOne({ _id: new ObjectId(req.params.id) })); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.patch("/meals/:id", async (req, res) => {
+  try {
+    res.send(await mealsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: req.body }
+    ));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// REVIEWS
+app.get("/reviews", async (req, res) => {
+  try { res.send(await reviewsCollection.find().sort({ date: 1 }).limit(6).toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/reviews/:foodId", async (req, res) => {
+  try { res.send(await reviewsCollection.find({ foodId: req.params.foodId }).toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/my-reviews/:email", async (req, res) => {
+  try { res.send(await reviewsCollection.find({ reviewerEmail: req.params.email }).toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.post("/reviews", verifyToken, async (req, res) => {
+  try { res.send(await reviewsCollection.insertOne(req.body)); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.patch("/reviews/:id", async (req, res) => {
+  try {
+    const { rating, comment } = req.body;
+    res.send(await reviewsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { rating, comment } }
+    ));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.delete("/reviews/:id", async (req, res) => {
+  try { res.send(await reviewsCollection.deleteOne({ _id: new ObjectId(req.params.id) })); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// ORDERS
+app.post("/orders", verifyToken, async (req, res) => {
+  try { res.send(await ordersCollection.insertOne(req.body)); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/orders/:email", verifyToken, async (req, res) => {
+  try {
+    if (req.decoded.email !== req.params.email) return res.status(403).send({ message: "Forbidden" });
+    res.send(await ordersCollection.find({ userEmail: req.params.email }).toArray());
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/chef-orders/:chefId", async (req, res) => {
+  try { res.send(await ordersCollection.find({ chefId: req.params.chefId }).toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.patch("/orders/update-status/:id", async (req, res) => {
+  try {
+    res.send(await ordersCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { orderStatus: req.body.orderStatus } }
+    ));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// FAVORITES
+app.post("/favorites", verifyToken, async (req, res) => {
+  try {
+    const exists = await favoritesCollection.findOne({ userEmail: req.body.userEmail, mealId: req.body.mealId });
+    if (exists) return res.send({ message: "Already in favorites" });
+    res.send(await favoritesCollection.insertOne(req.body));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/favorites/:email", async (req, res) => {
+  try { res.send(await favoritesCollection.find({ userEmail: req.params.email }).toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.delete("/favorites/:id", async (req, res) => {
+  try { res.send(await favoritesCollection.deleteOne({ _id: new ObjectId(req.params.id) })); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// REQUESTS
+app.post("/requests", async (req, res) => {
+  try {
+    const exists = await requestsCollection.findOne({ userEmail: req.body.userEmail, requestStatus: "pending" });
+    if (exists) return res.send({ message: "Already has pending request" });
+    res.send(await requestsCollection.insertOne(req.body));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/requests", verifyToken, verifyAdmin, async (req, res) => {
+  try { res.send(await requestsCollection.find().toArray()); }
+  catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.patch("/requests/accept/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { userEmail, requestType } = req.body;
+    await requestsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { requestStatus: "approved" } });
+    if (requestType === "chef") {
+      const chefId = `chef-${Math.floor(1000 + Math.random() * 9000)}`;
+      await usersCollection.updateOne({ email: userEmail }, { $set: { role: "chef", chefId } });
+    } else if (requestType === "admin") {
+      await usersCollection.updateOne({ email: userEmail }, { $set: { role: "admin" } });
+    }
+    res.send({ success: true });
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.patch("/requests/reject/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    res.send(await requestsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { requestStatus: "rejected" } }
+    ));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// ADMIN STATS
+app.patch("/users/fraud/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    res.send(await usersCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: "fraud" } }
+    ));
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.get("/admin/statistics", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const totalUsers = await usersCollection.countDocuments();
+    const totalOrders = await ordersCollection.countDocuments();
+    const pendingOrders = await ordersCollection.countDocuments({ orderStatus: "pending" });
+    const deliveredOrders = await ordersCollection.countDocuments({ orderStatus: "delivered" });
+    const cancelledOrders = await ordersCollection.countDocuments({ orderStatus: "cancelled" });
+    const acceptedOrders = await ordersCollection.countDocuments({ orderStatus: "accepted" });
+    const payments = await ordersCollection.find({ paymentStatus: "paid" }).toArray();
+    const totalPayment = payments.reduce((sum, o) => sum + o.price * o.quantity, 0);
+    res.send({ totalUsers, totalOrders, pendingOrders, deliveredOrders, cancelledOrders, acceptedOrders, totalPayment });
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+// PAYMENTS
+app.post("/create-payment-intent", verifyToken, async (req, res) => {
+  try {
+    const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(req.body.price * 100),
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+    res.send({ clientSecret: paymentIntent.client_secret });
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.post("/payments", verifyToken, async (req, res) => {
+  try {
+    const payment = req.body;
+    const result = await paymentsCollection.insertOne(payment);
+    await ordersCollection.updateOne(
+      { _id: new ObjectId(payment.orderId) },
+      { $set: { paymentStatus: "paid" } }
+    );
+    res.send(result);
+  } catch (e) { res.status(500).send({ message: e.message }); }
+});
+
+app.listen(port, () => console.log(`Server running on port: ${port} 🚀`));
