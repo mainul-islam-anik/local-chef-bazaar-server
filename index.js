@@ -126,13 +126,17 @@ async function run() {
 
     // ===== MEALS =====
     app.get('/daily-meals', async (req, res) => {
-      const result = await mealsCollection
-        .find()
-        .sort({ createdAt: 1 })
-        .limit(6)
-        .toArray();
-      res.send(result);
-    });
+  try {
+    const result = await mealsCollection
+      .find()
+      .sort({ createdAt: 1 })
+      .limit(6)
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Something went wrong" });
+  }
+});
 
     // ✅ Search সহ meals route
     app.get("/meals", async (req, res) => {
