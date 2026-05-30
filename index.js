@@ -17,38 +17,11 @@ app.use(cors({
 }));
 app.use(express.json())
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.4di52mx.mongodb.net/?appName=Cluster0`;
 
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-  maxPoolSize: 10,
-});
 
-// Collections — globally defined
-let usersCollection;
-let mealsCollection;
-let reviewsCollection;
-let ordersCollection;
-let favoritesCollection;
-let requestsCollection;
-let paymentsCollection;
 
-// ✅ Connect once
-client.connect().then(() => {
-  const db = client.db('localChef_db');
-  usersCollection = db.collection('users');
-  mealsCollection = db.collection('meals');
-  reviewsCollection = db.collection('reviews');
-  ordersCollection = db.collection("orders");
-  favoritesCollection = db.collection("favorites");
-  requestsCollection = db.collection("requests");
-  paymentsCollection = db.collection("payments");
-  console.log('MongoDB Connected ✅');
-}).catch(console.error);
+
+
 
 // ===== JWT Middleware =====
 const verifyToken = (req, res, next) => {
@@ -76,8 +49,64 @@ const verifyChef = async (req, res, next) => {
   next();
 };
 
+
+
+
+
+
+
+
+
+
+
+
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.4di52mx.mongodb.net/?appName=Cluster0`;
+
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+  // maxPoolSize: 10,
+});
+
+
+
+
+
+app.get('/', (req, res) =>{
+    res.send('Local Chef Bazaar server is running')
+})
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    // await client.connect();
+    console.log('database Connected')
+    // Send a ping to confirm a successful connection
+
+    const db = client.db('localChef_db');
+    const usersCollection = db.collection('users');
+    const mealsCollection = db.collection('meals');
+    const reviewsCollection = db.collection('reviews');
+    const ordersCollection = db.collection("orders");
+    const favoritesCollection = db.collection("favorites");
+    const requestsCollection = db.collection("requests");
+    const paymentsCollection = db.collection("payments");
+
+
+
+
+
+
+
+
+
+
+
+
 // ===== ROUTES =====
-app.get('/', (req, res) => res.send('LocalChefBazaar Server Running ✅'));
 
 app.post("/jwt", (req, res) => {
   const token = jwt.sign({ email: req.body.email }, process.env.JWT_SECRET, { expiresIn: "7d" });
@@ -345,4 +374,20 @@ app.post("/payments", verifyToken, async (req, res) => {
   } catch (e) { res.status(500).send({ message: e.message }); }
 });
 
-app.listen(port, () => console.log(`Server running on port: ${port} 🚀`));
+
+
+
+
+
+    // await client.db("admin").command({ ping: 1 });
+   // console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
+  }
+}
+run().catch(console.dir);
+
+app.listen(port, ()=>{
+    console.log(`LocalChef Bazaar server is running on port : ${port}`)
+})
