@@ -68,7 +68,7 @@ const client = new MongoClient(uri, {
     strict: true,
     deprecationErrors: true,
   },
-  // maxPoolSize: 10,
+  maxPoolSize: 1,
 });
 
 
@@ -83,7 +83,29 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
-    console.log('database Connected')
+
+
+// ✅ Connect একবার করুন
+async function connectDB() {
+  try {
+    if (!client.topology || !client.topology.isConnected()) {
+      await client.connect();
+      console.log('MongoDB Connected ✅');
+    }
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+  }
+}
+
+// ✅ প্রতিটা request এর আগে connect check করুন
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
+
+
+
+    // console.log('database Connected')
     // Send a ping to confirm a successful connection
 
     const db = client.db('localChef_db');
